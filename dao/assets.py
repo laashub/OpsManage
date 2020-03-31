@@ -1,6 +1,6 @@
 #!/usr/bin/env python  
 # _#_ coding:utf-8 _*_ 
-import uuid,xlrd
+import uuid,xlrd, json
 from asset.models import *
 from deploy.models import *
 from databases.models import *
@@ -8,7 +8,8 @@ from navbar.models import *
 from sched.models import *
 from wiki.models import *
 from orders.models import *
-from django.contrib.auth.models import User,Group
+from django.contrib.auth.models import Group
+from account.models import User,Structure
 from utils.logger import logger
 from dao.base import DjangoCustomCursors,DataHandle
 from django.http import QueryDict
@@ -57,9 +58,6 @@ class AssetsBase(DataHandle):
     def tagsList(self):
         return Tags_Assets.objects.all()      
     
-    def groupList(self):
-        return Group.objects.all()
-    
     def zoneList(self):
         return Zone_Assets.objects.all()
     
@@ -74,6 +72,12 @@ class AssetsBase(DataHandle):
     
     def assetsList(self):
         return Assets.objects.all()
+    
+    def groupList(self):
+        dicts = []
+        for ds in Structure.objects.filter(level__gt=0):
+            if ds.last_node() > 0:dicts.append(ds.to_json())
+        return dicts
     
     def manufacturerList(self):
         try:
@@ -119,15 +123,15 @@ class AssetsBase(DataHandle):
       
     
     def base(self):
-        return {"userList":self.userList(),"idcList":self.idcList(),
-                "groupList":self.groupList(),"raidList":self.raidList(),
+        return {"userList":self.userList(),"idcList":self.idcList(),               
                 "name":self.name,"serverList":self.serverList(),
                 "inventoryList":self.inventoryList(),"uuid": uuid.uuid4(),
                 "cabinetList":self.cabinetList(),"lineList":self.lineList(),
                 "manufacturerList":self.manufacturerList(),"modelList":self.modelList(),
                 "providerList":self.providerList(),"cpuList":self.cpuList(),
                 "systemList":self.systemList(),"kernelList":self.kernelList(),
-                "tagsList":self.tagsList(),"zoneList":self.zoneList()
+                "tagsList":self.tagsList(),"zoneList":self.zoneList(),
+                "raidList":self.raidList(),"groupList":self.groupList(),
                 }  
         
     def assets(self,id):
@@ -413,7 +417,7 @@ class AssetsCount(DjangoCustomCursors):
         
     def groupAssets(self):
         try:
-            return [ {"count":ds.count,"name":ds.name} for ds in Group.objects.raw("""SELECT t1.id,count(*) as count,t1.name from auth_group t1, opsmanage_assets t2 WHERE t2.group = t1.id GROUP BY t1.id ORDER BY count desc limit 5""")]
+            return [ {"count":ds.count,"name":ds.text} for ds in Group.objects.raw("""SELECT t1.id,count(*) as count,t1.text from opsmanage_structure t1, opsmanage_assets t2 WHERE t2.group = t1.id GROUP BY t1.id ORDER BY count desc limit 5;""")]
         except Exception as ex:
             logger.error(msg="统计业务组主机资产失败:{ex}".format(ex=ex))
         return self.dataList
@@ -641,15 +645,15 @@ class AssetsSource(object):
             assetsList = []
         return self.source(self.query_user_assets(request, assetsList))
     
-    def idSourceList(self,ids):
+    def idSourceList(self, ids):
         assetsList = Assets.objects.filter(id__in=ids)
         return self.source(assetsList)        
     
-    def idSource(self,ids):
+    def idSource(self, ids):
         assetsList = Assets.objects.filter(id=ids)
         return self.source(assetsList)
                 
-    def source(self,assetsList):                             
+    def source(self, assetsList):                             
         for assets in assetsList:
             data = {}
             if hasattr(assets,'server_assets'):
@@ -677,13 +681,14 @@ class AssetsSource(object):
                     data["sudo_passwd"] = assets.network_assets.sudo_passwd
                     data["connection"] = 'local'
                 except Exception as ex:
-                    logger.warn(msg="id:{assets}, error:{ex}".format(assets=assets.id,ex=ex))   
+                    logger.warn(msg="id:{assets}, error:{ex}".format(assets=assets.id,ex=ex)) 
+                      
             if assets.host_vars:
-                try:                         
-                    for k,v in eval(assets.host_vars).items():
-                        if k not in ["ip", "port", "username", "password","ip"]:data[k] = v
+                try: 
+                    data["vars"] = json.loads(assets.host_vars)
                 except Exception as ex:
                     logger.warn(msg="资产: {assets},转换host_vars失败:{ex}".format(assets=assets.id,ex=ex)) 
+                    
             self.resource.append(data)
         return self.sList, self.resource
         
@@ -1052,7 +1057,7 @@ class AssetsAnsible(DataHandle):
                     data["port"] = int(assets.server_assets.port)
                     data["username"] = assets.server_assets.username
                     data["hostname"] = assets.server_assets.ip
-                    data["sudo_passwd"] = assets.server_assets.sudo_passwd
+                    data["sudo_passwd"] = assets.server_assets.sudo_passwd                   
                     if assets.server_assets.keyfile == 0:data["password"] =  assets.server_assets.passwd  
                     elif assets.server_assets.keyfile_path:
                         data["private_key"] = assets.server_assets.keyfile_path                                            
@@ -1069,13 +1074,14 @@ class AssetsAnsible(DataHandle):
                     data["sudo_passwd"] = assets.network_assets.sudo_passwd
                     data["connection"] = 'local'
                 except Exception as ex:
-                    logger.warn(msg="id:{assets}, error:{ex}".format(assets=assets.id,ex=ex))   
+                    logger.warn(msg="id:{assets}, error:{ex}".format(assets=assets.id,ex=ex)) 
+                    
             if assets.host_vars:
-                try:                         
-                    for k,v in eval(assets.host_vars).items():
-                        if k not in ["ip", "port", "username", "password","ip"]:data[k] = v
+                try:                      
+                    data["vars"] = json.loads(assets.host_vars)
                 except Exception as ex:
                     logger.warn(msg="资产: {assets},转换host_vars失败:{ex}".format(assets=assets.id,ex=ex)) 
+                    
             resource.append(data)
         return sList,resource    
         

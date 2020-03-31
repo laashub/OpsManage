@@ -11,7 +11,7 @@ from navbar.models import *
 from wiki.models import *
 from orders.models import *
 from apply.models import *
-from django.contrib.auth.models import Group,User
+from account.models import User,Structure,Role
 from django_celery_beat.models  import CrontabSchedule,IntervalSchedule,PeriodicTask
 from django_celery_results.models import TaskResult 
 from rest_framework.pagination import CursorPagination
@@ -24,15 +24,21 @@ class PageConfig(CursorPagination):
     max_page_size = 200
 
 class UserSerializer(serializers.ModelSerializer):
-    date_joined = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S")
-    last_login = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S")
+    date_joined = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S",required=False)
+    last_login = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S",required=False)
+    superior_name = serializers.SerializerMethodField(read_only=True,required=False)
     class Meta:
         model = User
         fields = ('id','last_login','is_superuser','username',
                   'first_name','last_name','email','is_staff',
-                  'is_active','date_joined')       
- 
-           
+                  'is_active','date_joined',"mobile","name","department",
+                  'post','superior','roles','superior_name'
+                  )     
+        
+    def get_superior_name(self,obj):
+        return obj.superior_name()
+              
+        
 class BusinessEnvSerializer(serializers.ModelSerializer):
     class Meta:
         model = Business_Env_Assets
@@ -44,9 +50,10 @@ class BusinessTreeSerializer(serializers.ModelSerializer):
     last_node = serializers.SerializerMethodField(read_only=True,required=False)
     manage_name = serializers.SerializerMethodField(read_only=True,required=False)
     env_name = serializers.SerializerMethodField(read_only=True,required=False)
+    group_paths = serializers.SerializerMethodField(read_only=True,required=False)
     class Meta:
         model = Business_Tree_Assets
-        fields = ('id','text','env','env_name','manage','manage_name','parent','group','desc','icon','paths','last_node','tree_id')          
+        fields = ('id','text','env','env_name','manage','manage_name','parent','group','group_paths','desc','icon','paths','last_node','tree_id')          
     
     def get_env_name(self,obj):
         try:
@@ -69,10 +76,34 @@ class BusinessTreeSerializer(serializers.ModelSerializer):
     def get_icon(self,obj):
         return obj.icon()
     
-class GroupSerializer(serializers.ModelSerializer):
+    def get_group_paths(self,obj):
+        return obj.group_path()
+    
+class RoleSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Group
-        fields = ('id','name')
+        model = Role
+        fields = ('id','name','desc')
+        
+class StructureSerializer(serializers.ModelSerializer):
+    paths = serializers.SerializerMethodField(read_only=True,required=False)
+    icon = serializers.SerializerMethodField(read_only=True,required=False)
+    last_node = serializers.SerializerMethodField(read_only=True,required=False) 
+    manage_name = serializers.SerializerMethodField(read_only=True,required=False)    
+    class Meta:
+        model = Structure
+        fields = ('id','text','desc', 'type', 'parent', 'mail_group','manage','manage_name','wechat_webhook_url', 'dingding_webhook_url','icon','paths','last_node','tree_id')     
+           
+    def get_paths(self,obj):
+        return obj.node_path()
+    
+    def get_last_node(self,obj):
+        return obj.last_node()
+    
+    def get_icon(self,obj):
+        return obj.icon()
+    
+    def get_manage_name(self,obj):
+        return obj.manage_name()
           
 class TagsSerializer(serializers.ModelSerializer):
     class Meta:
@@ -257,11 +288,16 @@ class DataBaseServerSerializer(serializers.ModelSerializer):
 class DatabaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Database_Detail
-        fields = ('id','db_name','db_size') 
+        fields = ('id','db_name','db_size',"total_table") 
           
     def create(self,  validated_data):
         return Database_Detail.objects.create(db_server=self.context["db_server"], **validated_data)        
-        
+
+class DatabaseTableSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Database_Table_Detail_Record
+        fields = ('id','table_size','table_row','table_name','last_time')        
+             
         
 class CustomSQLSerializer(serializers.ModelSerializer):
     class Meta:
@@ -275,7 +311,7 @@ class HistroySQLSerializer(serializers.ModelSerializer):
     db_env = serializers.SerializerMethodField(read_only=True,required=False)
     class Meta:
         model = SQL_Execute_Histroy
-        fields = ('id','exe_sql','exe_user','exec_status','exe_result','db_host','db_name','create_time','db_env','exe_db',"exe_time")        
+        fields = ('id','exe_sql','exe_user','exec_status','exe_result','db_host','db_name','create_time','db_env','exe_db',"exe_time","exe_effect_row","favorite","mark")        
     
     def get_db_env(self,obj):
         return obj.exe_db.db_server.dataMap["env"][obj.exe_db.db_server.db_env]
@@ -343,9 +379,11 @@ class CronSerializer(serializers.ModelSerializer):
 class ApschedNodeSerializer(serializers.ModelSerializer):
     ip = serializers.CharField(source='sched_server.server_assets.ip', read_only=True)
     jobs_count = serializers.SerializerMethodField(read_only=True,required=False)
+    create_time = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S")
+    update_time = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S")
     class  Meta:
         model = Sched_Node
-        fields = ('sched_node','port', 'token','enable','ip','jobs_count')         
+        fields = ('sched_node','port', 'ak', 'sk','enable','ip','jobs_count','create_time', 'update_time')         
 
     def get_jobs_count(self,obj):
         return obj.node_jobs.all().count()      
